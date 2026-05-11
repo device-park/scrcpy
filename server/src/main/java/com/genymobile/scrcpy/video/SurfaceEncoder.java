@@ -195,10 +195,22 @@ public class SurfaceEncoder implements AsyncProcessor {
                 boolean mediaCodecStarted = false;
                 boolean captureStarted = false;
                 try {
-                    if (!headerWritten) {
-                        streamer.writeVideoHeader(size);
-                        headerWritten = true;
-                        Ln.d("[DIAG] Video header written");
+                    while (!headerWritten) {
+                        try {
+                            streamer.writeVideoHeader(size);
+                            headerWritten = true;
+                            Ln.d("[DIAG] Video header written");
+                        } catch (IOException e) {
+                            if (IO.isConnectionError(e)) {
+                                Ln.d("Stale client connection, waiting for next client...");
+                                if (!tryReconnect()) {
+                                    throw e;
+                                }
+                                // Retry header write with new connection
+                            } else {
+                                throw e;
+                            }
+                        }
                     }
 
                     mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
