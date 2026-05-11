@@ -188,12 +188,6 @@ public class SurfaceEncoder implements AsyncProcessor {
                 Size size = capture.getSize();
                 Ln.d("[DIAG] Capture size: " + size.getWidth() + "x" + size.getHeight());
 
-                if (!headerWritten) {
-                    streamer.writeVideoHeader(size);
-                    headerWritten = true;
-                    Ln.d("[DIAG] Video header written");
-                }
-
                 format.setInteger(MediaFormat.KEY_WIDTH, size.getWidth());
                 format.setInteger(MediaFormat.KEY_HEIGHT, size.getHeight());
 
@@ -201,6 +195,12 @@ public class SurfaceEncoder implements AsyncProcessor {
                 boolean mediaCodecStarted = false;
                 boolean captureStarted = false;
                 try {
+                    if (!headerWritten) {
+                        streamer.writeVideoHeader(size);
+                        headerWritten = true;
+                        Ln.d("[DIAG] Video header written");
+                    }
+
                     mediaCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
                     surface = mediaCodec.createInputSurface();
 
