@@ -40,7 +40,6 @@ public class SurfaceEncoder implements AsyncProcessor {
 
     private static final int DEFAULT_I_FRAME_INTERVAL = 10; // seconds
     private static final int REPEAT_FRAME_DELAY_US = 100_000; // repeat after 100ms
-    private static final long DEFAULT_FRAME_REFRESH_INTERVAL_MS = 500; // force a frame every 500ms
     private static final long DEQUEUE_TIMEOUT_US = 1_000_000; // 1 second
     private static final int PREPARE_RETRY_DELAY_MS = 200;
     private static final int PREPARE_RETRY_COUNT = 3;
@@ -58,7 +57,6 @@ public class SurfaceEncoder implements AsyncProcessor {
     private final int videoBitRate;
     private final float maxFps;
     private final boolean downsizeOnError;
-    private final long frameRefreshIntervalMs;
 
     private SocketReconnector socketReconnector;
 
@@ -81,8 +79,6 @@ public class SurfaceEncoder implements AsyncProcessor {
         this.codecOptions = options.getVideoCodecOptions();
         this.encoderName = options.getVideoEncoder();
         this.downsizeOnError = options.getDownsizeOnError();
-        int interval = options.getFrameRefreshIntervalMs();
-        this.frameRefreshIntervalMs = interval > 0 ? interval : DEFAULT_FRAME_REFRESH_INTERVAL_MS;
     }
 
     public void setSocketReconnector(SocketReconnector reconnector) {
@@ -407,35 +403,7 @@ public class SurfaceEncoder implements AsyncProcessor {
         long packetsThisSession = 0;
         long packetsSkipped = 0;
 
-        // Periodically refresh the capture to force the encoder to produce output
-        // even when the screen content hasn't changed
-        AtomicBoolean encoding = new AtomicBoolean(true);
-        Thread refreshThread = new Thread(() -> {
-            Ln.d("[DIAG] Frame refresh thread running");
-            while (encoding.get()) {
-                try {
-                    Thread.sleep(frameRefreshIntervalMs);
-                } catch (InterruptedException e) {
-                    break;
-                }
-                if (!encoding.get()) {
-                    break;
-                }
-                try {
-                    capture.requestRefresh();
-                    Ln.d("[DIAG] Requested capture refresh");
-                } catch (Exception e) {
-                    Ln.d("[DIAG] Frame refresh thread stopping: " + e.getMessage());
-                    break;
-                }
-            }
-        }, "frame-refresh");
-        refreshThread.setDaemon(true);
-        refreshThread.start();
-        Ln.d("[DIAG] Frame refresh thread started (interval=" + frameRefreshIntervalMs + "ms)");
-
         boolean eos = false;
-        try {
         do {
             int outputBufferId = codec.dequeueOutputBuffer(bufferInfo, DEQUEUE_TIMEOUT_US);
             try {
@@ -517,10 +485,6 @@ public class SurfaceEncoder implements AsyncProcessor {
                 }
             }
         } while (!eos);
-        } finally {
-            encoding.set(false);
-            refreshThread.interrupt();
-        }
     }
 
     private static MediaCodec createMediaCodec(Codec codec, String encoderName) throws IOException, ConfigurationException {
