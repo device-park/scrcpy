@@ -151,7 +151,6 @@ public class SurfaceEncoder implements AsyncProcessor {
         try {
             boolean alive;
             boolean headerWritten = false;
-            boolean rotationBrokenPipeRecovery = false;
             int loopIteration = 0;
 
             do {
@@ -159,7 +158,6 @@ public class SurfaceEncoder implements AsyncProcessor {
                 boolean wasReset = reset.consumeReset(); // If a capture reset was requested, it is implicitly fulfilled
                 Ln.d("[DIAG] streamCapture loop iteration=" + loopIteration
                         + " wasReset=" + wasReset
-                        + " rotationBrokenPipeRecovery=" + rotationBrokenPipeRecovery
                         + " pendingReset=" + reset.hasPendingReset()
                         + " stopped=" + stopped.get());
 
@@ -218,6 +216,11 @@ public class SurfaceEncoder implements AsyncProcessor {
                     mediaCodec.start();
                     mediaCodecStarted = true;
 
+                    // Force the display to render to the new surface immediately.
+                    // Without this, the encoder waits until the screen content changes,
+                    // which can take several seconds after rotation or reconnection.
+                    capture.requestRefresh();
+
                     Ln.d("[DIAG] Encoder started successfully, size=" + size.getWidth() + "x" + size.getHeight());
 
                     // Reset error counter — successfully restarted after rotation
@@ -239,8 +242,6 @@ public class SurfaceEncoder implements AsyncProcessor {
                             encode(mediaCodec, streamer);
                             Ln.d("[DIAG] encode() returned normally, totalPacketsWritten=" + totalPacketsWritten);
                         }
-                        // Encoding succeeded (or exited cleanly via reset), clear recovery flag
-                        rotationBrokenPipeRecovery = false;
                         // The capture might have been closed internally (for example if the camera is disconnected)
                         alive = !stopped.get() && !capture.isClosed();
                         if (!alive) {
@@ -253,53 +254,14 @@ public class SurfaceEncoder implements AsyncProcessor {
                             + " | isConnectionError=" + IO.isConnectionError(e)
                             + " | wasReset=" + wasReset
                             + " | pendingReset=" + reset.hasPendingReset()
-                            + " | rotationBrokenPipeRecovery=" + rotationBrokenPipeRecovery
                             + " | iteration=" + loopIteration);
                     Ln.w("[DIAG] Full stack trace:\n" + getStackTraceString(e));
 
                     if (IO.isConnectionError(e)) {
-                        if (reset.hasPendingReset() || wasReset) {
-                            if (rotationBrokenPipeRecovery) {
-                                // Socket is permanently broken after a rotation recovery attempt.
-                                // Try to accept a new client connection.
-                                Ln.w("[DIAG] Broken pipe persists after rotation recovery, socket is dead. Attempting reconnect...");
-                                if (tryReconnect()) {
-                                    headerWritten = false; // must re-send video header to new client
-                                    rotationBrokenPipeRecovery = false;
-                                    alive = true;
-                                    continue;
-                                }
-                                Ln.w("Client disconnected during rotation and no reconnection available");
-                                alive = false;
-                                continue;
-                            }
-                            // Broken pipe during or just after a rotation transition: the client
-                            // may have been disrupted by trailing encoder output during rotation.
-                            // Allow the rotation loop to complete one more iteration so the new
-                            // encoder gets a chance to write to the socket cleanly.
-                            Ln.w("Broken pipe during rotation transition, retrying (wasReset=" + wasReset
-                                    + ", pendingReset=" + reset.hasPendingReset() + ")");
-                            rotationBrokenPipeRecovery = true;
-                            alive = true;
-                            continue;
-                        }
-                        if (rotationBrokenPipeRecovery) {
-                            // The retry after rotation also got a broken pipe, but no new reset
-                            // is pending. Try to accept a new client connection.
-                            Ln.w("[DIAG] Broken pipe after rotation recovery attempt (no pending reset). Attempting reconnect...");
-                            if (tryReconnect()) {
-                                headerWritten = false;
-                                rotationBrokenPipeRecovery = false;
-                                alive = true;
-                                continue;
-                            }
-                            Ln.w("Client disconnected during rotation and no reconnection available");
-                            alive = false;
-                            continue;
-                        }
-                        // Client disconnected normally (no rotation context).
-                        // Try to accept a new client connection instead of dying.
-                        Ln.i("Client disconnected. Waiting for a new client...");
+                        // Client disconnected (broken pipe). Try to accept a new client connection.
+                        boolean duringRotation = reset.hasPendingReset() || wasReset;
+                        Ln.i("Client disconnected" + (duringRotation ? " during rotation" : "")
+                                + ". Waiting for a new client...");
                         if (tryReconnect()) {
                             headerWritten = false; // must re-send video header to new client
                             firstFrameSent = false;

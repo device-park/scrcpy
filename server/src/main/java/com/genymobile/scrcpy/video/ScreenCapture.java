@@ -245,9 +245,11 @@ public class ScreenCapture extends SurfaceCapture {
     @Override
     public void requestRefresh() {
         if (virtualDisplay != null && currentSurface != null) {
+            Ln.d("[DIAG] requestRefresh: toggling VirtualDisplay surface (null+set)");
             virtualDisplay.setSurface(null);
             virtualDisplay.setSurface(currentSurface);
         } else if (display != null && currentSurface != null) {
+            Ln.d("[DIAG] requestRefresh: toggling SurfaceControl display surface (null+set)");
             SurfaceControl.openTransaction();
             try {
                 SurfaceControl.setDisplaySurface(display, null);
@@ -260,6 +262,9 @@ public class ScreenCapture extends SurfaceCapture {
             } finally {
                 SurfaceControl.closeTransaction();
             }
+        } else {
+            Ln.w("[DIAG] requestRefresh: no display or surface available (virtualDisplay="
+                    + virtualDisplay + ", display=" + display + ", currentSurface=" + currentSurface + ")");
         }
     }
 }
